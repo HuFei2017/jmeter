@@ -38,7 +38,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * ThreadGroup holds the settings for a JMeter thread group.
- * 
+ *
  * This class is intended to be ThreadSafe.
  */
 @GUIMenuSortOrder(1)
@@ -46,7 +46,7 @@ public class ThreadGroup extends AbstractThreadGroup {
     private static final long serialVersionUID = 282L;
 
     private static final Logger log = LoggerFactory.getLogger(ThreadGroup.class);
-    
+
     private static final long WAIT_TO_DIE = JMeterUtils.getPropDefault("jmeterengine.threadstop.wait", 5 * 1000); // 5 seconds
 
     /** How often to check for shutdown during ramp-up, default 1000ms */
@@ -69,14 +69,13 @@ public class ThreadGroup extends AbstractThreadGroup {
 
     /** Scheduler start delay, overrides start time */
     public static final String DELAY = "ThreadGroup.delay";
-
     //- JMX entries
 
     private transient Thread threadStarter;
 
     // List of active threads
     private final ConcurrentHashMap<JMeterThread, Thread> allThreads = new ConcurrentHashMap<>();
-    
+
     private transient Object addThreadLock = new Object();
 
     /** Is test (still) running? */
@@ -216,6 +215,7 @@ public class ThreadGroup extends AbstractThreadGroup {
         this.threadGroupTree = threadGroupTree;
         int numThreads = getNumThreads();
         int rampUpPeriodInSeconds = getRampUp();
+        boolean isSameUserOnNextIteration = isSameUserOnNextIteration();
         delayedStartup = isDelayedStartup(); // Fetch once; needs to stay constant
         log.info("Starting thread group... number={} threads={} ramp-up={} delayedStart={}", groupNumber,
                 numThreads, rampUpPeriodInSeconds, delayedStartup);
@@ -236,11 +236,11 @@ public class ThreadGroup extends AbstractThreadGroup {
                     delayForNextThreadInMillis += perThreadDelayInMillis - timeElapsedToStartLastThread;
                 }
                 if (log.isDebugEnabled()) {
-                    log.debug("Computed delayForNextThreadInMillis:{} for thread:{}", delayForNextThreadInMillis);
+                    log.debug("Computed delayForNextThreadInMillis:{} for thread:{}", delayForNextThreadInMillis, Thread.currentThread().getId());
                 }
                 lastThreadStartInMillis = nowInMillis;
-                startNewThread(notifier, threadGroupTree, engine, threadNum, context, nowInMillis,
-                        Math.max(0, delayForNextThreadInMillis));
+                startNewThread(notifier, threadGroupTree, engine, threadNum, context, nowInMillis, Math.max(0, delayForNextThreadInMillis),
+                        isSameUserOnNextIteration);
             }
         }
         log.info("Started thread group number {}", groupNumber);
@@ -255,11 +255,12 @@ public class ThreadGroup extends AbstractThreadGroup {
      * @param context {@link JMeterContext}
      * @param now Nom in milliseconds
      * @param delay int delay in milliseconds
+     * @param isSameUserOnNextIteration boolean indicating a next iteration will simulate a new or returning user
      * @return {@link JMeterThread} newly created
      */
     private JMeterThread startNewThread(ListenerNotifier notifier, ListedHashTree threadGroupTree, StandardJMeterEngine engine,
-            int threadNum, final JMeterContext context, long now, int delay) {
-        JMeterThread jmThread = makeThread(notifier, threadGroupTree, engine, threadNum, context);
+            int threadNum, final JMeterContext context, long now, int delay, Boolean isSameUserOnNextIteration) {
+        JMeterThread jmThread = makeThread(notifier, threadGroupTree, engine, threadNum, context, isSameUserOnNextIteration);
         scheduleThread(jmThread, now); // set start and end time
         jmThread.setInitialDelay(delay);
         Thread newThread = new Thread(jmThread, jmThread.getThreadName());
@@ -267,7 +268,7 @@ public class ThreadGroup extends AbstractThreadGroup {
         newThread.start();
         return jmThread;
     }
-    
+
     /*
      * Fix NPE for addThreadLock transient object in remote mode (BZ60829)
      */
@@ -275,7 +276,7 @@ public class ThreadGroup extends AbstractThreadGroup {
         in.defaultReadObject();
         addThreadLock = new Object();
     }
-    
+
     /**
      * Register Thread when it starts
      * @param jMeterThread {@link JMeterThread}
@@ -292,22 +293,23 @@ public class ThreadGroup extends AbstractThreadGroup {
      * @param engine {@link StandardJMeterEngine}
      * @param threadNumber int thread number
      * @param context {@link JMeterContext}
+     * @param isSameUserOnNextIteration Boolean
      * @return {@link JMeterThread}
      */
     private JMeterThread makeThread(
             ListenerNotifier notifier, ListedHashTree threadGroupTree,
-            StandardJMeterEngine engine, int threadNumber, 
-            JMeterContext context) { // N.B. Context needs to be fetched in the correct thread
+            StandardJMeterEngine engine, int threadNumber,
+            JMeterContext context, Boolean isSameUserOnNextIteration) { // N.B. Context needs to be fetched in the correct thread
         boolean onErrorStopTest = getOnErrorStopTest();
         boolean onErrorStopTestNow = getOnErrorStopTestNow();
         boolean onErrorStopThread = getOnErrorStopThread();
         boolean onErrorStartNextLoop = getOnErrorStartNextLoop();
         String groupName = getName();
-        final JMeterThread jmeterThread = new JMeterThread(cloneTree(threadGroupTree), this, notifier);
+        final JMeterThread jmeterThread = new JMeterThread(cloneTree(threadGroupTree), this, notifier, isSameUserOnNextIteration);
         jmeterThread.setThreadNum(threadNumber);
         jmeterThread.setThreadGroup(this);
         jmeterThread.setInitialContext(context);
-        String distributedPrefix = 
+        String distributedPrefix =
                 JMeterUtils.getPropDefault(JMeterUtils.THREAD_GROUP_DISTRIBUTED_PREFIX_PROPERTY_NAME, "");
         final String threadName = distributedPrefix + (distributedPrefix.isEmpty() ? "":"-") +groupName + " " + groupNumber + "-" + (threadNumber + 1);
         jmeterThread.setThreadName(threadName);
@@ -329,7 +331,7 @@ public class ThreadGroup extends AbstractThreadGroup {
             numThreads = getNumThreads();
             setNumThreads(numThreads + 1);
         }
-        newJmThread = startNewThread(notifier, threadGroupTree, engine, numThreads, context, now, delay);
+        newJmThread = startNewThread(notifier, threadGroupTree, engine, numThreads, context, now, delay, isSameUserOnNextIteration());
         JMeterContextService.addTotalThreads( 1 );
         log.info("Started new thread in group {}", groupNumber);
         return newJmThread;
@@ -357,7 +359,7 @@ public class ThreadGroup extends AbstractThreadGroup {
         }
         return false;
     }
-    
+
     /**
      * Hard Stop JMeterThread thrd and interrupt JVM Thread if interrupt is true
      * @param jmeterThread {@link JMeterThread}
@@ -403,11 +405,11 @@ public class ThreadGroup extends AbstractThreadGroup {
      *  <li>current running samplers</li>
      * </ul>
      * For each thread, invoke:
-     * <ul> 
+     * <ul>
      * <li>{@link JMeterThread#stop()} - set stop flag</li>
      * <li>{@link JMeterThread#interrupt()} - interrupt sampler</li>
      * <li>{@link Thread#interrupt()} - interrupt JVM thread</li>
-     * </ul> 
+     * </ul>
      */
     @Override
     public void tellThreadsToStop() {
@@ -417,9 +419,9 @@ public class ThreadGroup extends AbstractThreadGroup {
     /**
      * This is a clean shutdown.
      * For each thread, invoke:
-     * <ul> 
+     * <ul>
      * <li>{@link JMeterThread#stop()} - set stop flag</li>
-     * </ul> 
+     * </ul>
      */
     @Override
     public void stop() {
@@ -429,7 +431,7 @@ public class ThreadGroup extends AbstractThreadGroup {
                 threadStarter.interrupt();
             } catch (Exception e) {
                 log.warn("Exception occurred interrupting ThreadStarter", e);
-            }            
+            }
         }
         allThreads.keySet().forEach(JMeterThread::stop);
     }
@@ -494,8 +496,8 @@ public class ThreadGroup extends AbstractThreadGroup {
          */
         while (!allThreads.isEmpty()) {
             allThreads.values().forEach(this::waitThreadStopped);
-        }   
-      
+        }
+
     }
 
     /**
@@ -575,7 +577,7 @@ public class ThreadGroup extends AbstractThreadGroup {
                 }
             }
         }
-        
+
         @Override
         public void run() {
             try {
@@ -597,17 +599,18 @@ public class ThreadGroup extends AbstractThreadGroup {
                 final int numThreads = getNumThreads();
                 final float rampUpOriginInMillis = (float) getRampUp() * 1000;
                 final long startTimeInMillis = System.currentTimeMillis();
+                final boolean isSameUserOnNextIteration = isSameUserOnNextIteration();
                 for (int threadNumber = 0; running && threadNumber < numThreads; threadNumber++) {
                     if (threadNumber > 0) {
-                        long elapsedInMillis = System.currentTimeMillis() - startTimeInMillis; 
-                        final int perThreadDelayInMillis = 
+                        long elapsedInMillis = System.currentTimeMillis() - startTimeInMillis;
+                        final int perThreadDelayInMillis =
                                 Math.round((rampUpOriginInMillis - elapsedInMillis) / (float) (numThreads - threadNumber));
                         pause(Math.max(0, perThreadDelayInMillis)); // ramp-up delay (except first)
                     }
                     if (usingScheduler && System.currentTimeMillis() > endtime) {
                         break; // no point continuing beyond the end time
                     }
-                    JMeterThread jmThread = makeThread(notifier, threadGroupTree, engine, threadNumber, context);
+                    JMeterThread jmThread = makeThread(notifier, threadGroupTree, engine, threadNumber, context, isSameUserOnNextIteration);
                     jmThread.setInitialDelay(0);   // Already waited
                     if (usingScheduler) {
                         jmThread.setScheduled(true);

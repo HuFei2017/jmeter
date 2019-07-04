@@ -30,6 +30,7 @@ import org.apache.jmeter.engine.event.LoopIterationListener;
 import org.apache.jmeter.samplers.Sampler;
 import org.apache.jmeter.testelement.AbstractTestElement;
 import org.apache.jmeter.testelement.TestElement;
+import org.apache.jmeter.testelement.property.BooleanProperty;
 import org.apache.jmeter.testelement.property.IntegerProperty;
 import org.apache.jmeter.testelement.property.JMeterProperty;
 import org.apache.jmeter.testelement.property.TestElementProperty;
@@ -37,10 +38,10 @@ import org.apache.jorphan.collections.ListedHashTree;
 
 /**
  * ThreadGroup holds the settings for a JMeter thread group.
- * 
+ *
  * This class is intended to be ThreadSafe.
  */
-public abstract class AbstractThreadGroup extends AbstractTestElement 
+public abstract class AbstractThreadGroup extends AbstractTestElement
     implements Serializable, Controller, JMeterThreadMonitor, TestCompilerHelper {
 
     private static final long serialVersionUID = 240L;
@@ -72,6 +73,10 @@ public abstract class AbstractThreadGroup extends AbstractTestElement
     public static final String NUM_THREADS = "ThreadGroup.num_threads";
 
     public static final String MAIN_CONTROLLER = "ThreadGroup.main_controller";
+
+    /** The same user or different users */
+    public static final String IS_SAME_USER_ON_NEXT_ITERATION = "ThreadGroup.same_user_on_next_iteration";
+
 
     private final AtomicInteger numberOfThreads = new AtomicInteger(0); // Number of active threads in this group
 
@@ -135,7 +140,7 @@ public abstract class AbstractThreadGroup extends AbstractTestElement
     public void addIterationListener(LoopIterationListener lis) {
         getSamplerController().addIterationListener(lis);
     }
-    
+
     /** {@inheritDoc} */
     @Override
     public void removeIterationListener(LoopIterationListener iterationListener) {
@@ -158,7 +163,7 @@ public abstract class AbstractThreadGroup extends AbstractTestElement
     public void startNextLoop() {
        ((LoopController) getSamplerController()).startNextLoop();
     }
-    
+
     /**
      * NOOP
      */
@@ -166,7 +171,7 @@ public abstract class AbstractThreadGroup extends AbstractTestElement
     public void triggerEndOfLoop() {
         // NOOP
     }
-    
+
     /**
      * Set the total number of threads to start
      *
@@ -199,7 +204,7 @@ public abstract class AbstractThreadGroup extends AbstractTestElement
     public int getNumberOfThreads() {
         return numberOfThreads.get();
     }
-    
+
     /**
      * Get the number of threads.
      *
@@ -248,13 +253,13 @@ public abstract class AbstractThreadGroup extends AbstractTestElement
     /**
      * Hard or graceful stop depending on now flag
      * @param threadName String thread name
-     * @param now if true interrupt {@link Thread} 
+     * @param now if true interrupt {@link Thread}
      * @return boolean true if stop succeeded
      */
     public abstract boolean stopThread(String threadName, boolean now);
 
     /**
-     * @return int number of active threads 
+     * @return int number of active threads
      */
     public abstract int numberOfActiveThreads();
 
@@ -298,5 +303,28 @@ public abstract class AbstractThreadGroup extends AbstractTestElement
 
     public void breakThreadLoop() {
         ((LoopController) getSamplerController()).breakLoop();
+    }
+
+    /**
+     * Set the kind of user
+     *
+     * @param isSameUserOnNextIteration
+     *            true is the same user on next iteration of loop
+     *            false is a different user on next iteration of loop
+     */
+    public void setIsSameUserOnNextIteration(boolean isSameUserOnNextIteration) {
+        setProperty(new BooleanProperty(IS_SAME_USER_ON_NEXT_ITERATION, isSameUserOnNextIteration));
+    }
+
+    /**
+     * Get kind of user:
+     * <ul>
+     *  <li>true means same user running multiple iterations</li>
+     *  <li>false means a different user for each iteration</li>
+     * </ul>
+     * @return the kind of user.
+     */
+    public boolean isSameUserOnNextIteration() {
+        return getPropertyAsBoolean(ThreadGroup.IS_SAME_USER_ON_NEXT_ITERATION);
     }
 }

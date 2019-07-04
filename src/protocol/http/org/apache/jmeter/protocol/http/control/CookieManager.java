@@ -40,6 +40,8 @@ import org.apache.jmeter.testelement.property.CollectionProperty;
 import org.apache.jmeter.testelement.property.JMeterProperty;
 import org.apache.jmeter.testelement.property.PropertyIterator;
 import org.apache.jmeter.threads.JMeterContext;
+import org.apache.jmeter.threads.JMeterContextService;
+import org.apache.jmeter.threads.JMeterVariables;
 import org.apache.jmeter.util.JMeterUtils;
 import org.apache.jorphan.reflect.ClassTools;
 import org.apache.jorphan.util.JMeterException;
@@ -61,6 +63,7 @@ public class CookieManager extends ConfigTestElement implements TestStateListene
     private static final String COOKIES = "CookieManager.cookies";// $NON-NLS-1$
     private static final String POLICY = "CookieManager.policy"; //$NON-NLS-1$
     private static final String IMPLEMENTATION = "CookieManager.implementation"; //$NON-NLS-1$
+    private static final String CONTROLLED_BY_THREADGROUP = "CookieManager.controlledByThreadGroup";// $NON-NLS-1$
     //-- JMX tag values
 
     private static final String TAB = "\t"; //$NON-NLS-1$
@@ -84,8 +87,8 @@ public class CookieManager extends ConfigTestElement implements TestStateListene
         JMeterUtils.getPropDefault("CookieManager.check.cookies", true);// $NON-NLS-1$
 
     static {
-        log.info("Settings: Delete null: {} Check: {} Allow variable: {} Save: {} Prefix: {}", 
-                DELETE_NULL_COOKIES, CHECK_COOKIES, ALLOW_VARIABLE_COOKIES, 
+        log.info("Settings: Delete null: {} Check: {} Allow variable: {} Save: {} Prefix: {}",
+                DELETE_NULL_COOKIES, CHECK_COOKIES, ALLOW_VARIABLE_COOKIES,
                 SAVE_COOKIES, COOKIE_NAME_PREFIX);
     }
 
@@ -96,17 +99,17 @@ public class CookieManager extends ConfigTestElement implements TestStateListene
      * Defines the policy that is assumed when the JMX file does not contain an entry for it
      * MUST NOT BE CHANGED otherwise JMX files will not be correctly interpreted
      * <p>
-     * The default policy for new CookieManager elements is defined by 
+     * The default policy for new CookieManager elements is defined by
      * {@link org.apache.jmeter.protocol.http.gui.CookiePanel#DEFAULT_POLICY CookiePanel#DEFAULT_POLICY}
      *
      */
     private static final String DEFAULT_POLICY = CookieSpecs.STANDARD;
-    
+
     /**
      * Defines the implementation that is assumed when the JMX file does not contain an entry for it
      * MUST NOT BE CHANGED otherwise JMX files will not be correctly interpreted
      * <p>
-     * The default implementation for new CookieManager elements is defined by 
+     * The default implementation for new CookieManager elements is defined by
      * {@link org.apache.jmeter.protocol.http.gui.CookiePanel#DEFAULT_IMPLEMENTATION CookiePanel#DEFAULT_IMPLEMENTATION}
      *
      */
@@ -148,6 +151,13 @@ public class CookieManager extends ConfigTestElement implements TestStateListene
 
     public void setClearEachIteration(boolean clear) {
         setProperty(new BooleanProperty(CLEAR, clear));
+    }
+    public boolean getControlledByThread() {
+        return getPropertyAsBoolean(CONTROLLED_BY_THREADGROUP);
+    }
+
+    public void setControlledByThread(boolean control) {
+        setProperty(new BooleanProperty(CONTROLLED_BY_THREADGROUP, control));
     }
 
     public String getImplementation() {
@@ -428,7 +438,9 @@ public class CookieManager extends ConfigTestElement implements TestStateListene
     /** {@inheritDoc} */
     @Override
     public void testIterationStart(LoopIterationEvent event) {
-        if (getClearEachIteration()) {
+        JMeterVariables jMeterVariables = JMeterContextService.getContext().getVariables();
+        if ((getControlledByThread() && !jMeterVariables.isSameUserOnNextIteration())
+                || (!getControlledByThread() && getClearEachIteration())) {
             log.debug("Initialise cookies from pre-defined list");
             // No need to call clear
             setProperty(initialCookies.clone());
